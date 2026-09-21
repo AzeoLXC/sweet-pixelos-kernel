@@ -99,6 +99,56 @@ int path_umount(struct path *path, int flags)
                 f.write(content)
             print("[+] Patched KernelSU-Next event.c timespec64")
 
+    # 5. KernelSU-Next selinux_hide.c Zygote crash fix
+    # Upstream commit dd074bc added selinux_hide which intercepts /sys/fs/selinux/context
+    # and returns -EINVAL for uid >= 10000. In Android 14+, Zygote drops UID before
+    # calling selinux_android_setcontext -> security_check_context, causing all apps to abort!
+    hide_file = "KernelSU-Next/kernel/feature/selinux_hide.c"
+    if os.path.exists(hide_file):
+        with open(hide_file, "r") as f:
+            content = f.read()
+        modified = False
+        if "static bool ksu_selinux_hide_is_enabled __read_mostly = true;" in content:
+            content = content.replace(
+                "static bool ksu_selinux_hide_is_enabled __read_mostly = true;",
+                "static bool ksu_selinux_hide_is_enabled __read_mostly = false;"
+            )
+            modified = True
+        if "void __init ksu_selinux_hide_init(void)\n{" in content and "return;" not in content.split("void __init ksu_selinux_hide_init(void)\n{")[1][:50]:
+            content = content.replace(
+                "void __init ksu_selinux_hide_init(void)\n{",
+                "void __init ksu_selinux_hide_init(void)\n{\n\treturn;",
+                1
+            )
+            modified = True
+        if "static void hook_selinux_transaction_write(void)\n{" in content and "return;" not in content.split("static void hook_selinux_transaction_write(void)\n{")[1][:50]:
+            content = content.replace(
+                "static void hook_selinux_transaction_write(void)\n{",
+                "static void hook_selinux_transaction_write(void)\n{\n\treturn;",
+                1
+            )
+            modified = True
+        if "static void hook_selinux_status_open(void)\n{" in content and "return;" not in content.split("static void hook_selinux_status_open(void)\n{")[1][:50]:
+            content = content.replace(
+                "static void hook_selinux_status_open(void)\n{",
+                "static void hook_selinux_status_open(void)\n{\n\treturn;",
+                1
+            )
+            modified = True
+        if "return -EINVAL;" in content:
+            content = content.replace(
+                "return -EINVAL;",
+                "return orig_selinux_transaction_write ? orig_selinux_transaction_write(file, buf, size, pos) : 0;"
+            )
+            modified = True
+
+        if modified:
+            with open(hide_file, "w") as f:
+                f.write(content)
+            print("[+] Patched KernelSU-Next selinux_hide.c to prevent Zygote specialization abort")
+        else:
+            print("[-] No changes needed or anchors not found in selinux_hide.c")
+
     print("[*] Pre-build patch complete.")
 
 if __name__ == "__main__":
