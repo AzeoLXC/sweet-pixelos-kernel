@@ -73,7 +73,7 @@ jobs:
           cd kernel
           KSU_TARGET="${{ github.event.inputs.ksu_branch || 'legacy' }}"
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s "$KSU_TARGET"
-          sed -i 's/get_monotonic_boottime(&ts)/ktime_get_boottime_ts64(\&ts)/g' KernelSU-Next/kernel/sulog/event.c
+          python3 ../scripts/patch_ksu.py
 
       - name: Compile Kernel Image
         run: |
