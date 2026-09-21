@@ -51,6 +51,9 @@ jobs:
           KSU_TARGET="${{ github.event.inputs.ksu_branch || 'legacy' }}"
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s "$KSU_TARGET"
 
+          # Fix kernel 4.14 timespec64 pointer mismatch in sulog
+          sed -i 's/get_monotonic_boottime(&ts)/ktime_get_boottime_ts64(\&ts)/g' KernelSU-Next/kernel/sulog/event.c
+
       - name: Compile Kernel
         run: |
           cd kernel
