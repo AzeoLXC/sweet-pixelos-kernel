@@ -10,10 +10,28 @@ on:
         type: string
 
 jobs:
-  build:
-    name: Compile & Package Kernel
+  check:
+    name: 1. Upstream & Metadata Check
     runs-on: ubuntu-22.04
+    outputs:
+      kernel_head: ${{ steps.get_meta.outputs.kernel_head }}
+      build_time: ${{ steps.get_meta.outputs.build_time }}
+    steps:
+      - name: Fetch Upstream Metadata
+        id: get_meta
+        run: |
+          SHA=$(curl -s "https://api.github.com/repos/SoloSaravanan/kernel_xiaomi_sm6150/commits/17" | jq -r '.sha[0:7]')
+          DATE=$(TZ=Asia/Jakarta date '+%Y%m%d_%H%M')
+          echo "kernel_head=${SHA}" >> $GITHUB_OUTPUT
+          echo "build_time=${DATE}" >> $GITHUB_OUTPUT
 
+  build:
+    name: 2. Compile & Package Kernel
+    needs: check
+    runs-on: ubuntu-22.04
+    outputs:
+      zip_name: ${{ steps.package.outputs.zip_name }}
+      sha256: ${{ steps.package.outputs.sha256 }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -26,7 +44,7 @@ jobs:
             libc6-dev libelf-dev libssl-dev make openssl python3 \
             python-is-python3 zlib1g-dev ccache zip jq
 
-      - name: Setup ZyCromerZ Clang & GCC Toolchains
+      - name: Setup Toolchains
         run: |
           mkdir -p clang
           aria2c -q -s 16 -x 16 "https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230725-release/Clang-17.0.0-20230725.tar.gz" -o clang.tar.gz
@@ -43,20 +61,15 @@ jobs:
       - name: Clone Kernel Source
         run: |
           git clone --depth=1 -b 17 https://github.com/SoloSaravanan/kernel_xiaomi_sm6150.git kernel
-          cd kernel
-          KERNEL_HEAD=$(git rev-parse --short HEAD)
-          echo "KERNEL_HEAD=$KERNEL_HEAD" >> $GITHUB_ENV
 
       - name: Setup KernelSU-Next
         run: |
           cd kernel
           KSU_TARGET="${{ github.event.inputs.ksu_branch || 'legacy' }}"
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s "$KSU_TARGET"
-
-          # Fix kernel 4.14 timespec64 pointer mismatch in sulog
           sed -i 's/get_monotonic_boottime(&ts)/ktime_get_boottime_ts64(\&ts)/g' KernelSU-Next/kernel/sulog/event.c
 
-      - name: Compile Kernel
+      - name: Compile Kernel Image
         run: |
           cd kernel
           export ARCH=arm64
@@ -65,7 +78,6 @@ jobs:
           export KBUILD_BUILD_USER="azeolxc"
           export KBUILD_BUILD_HOST="PixelOS-sweet"
 
-          # Inject KSU and Kprobe configs into defconfig
           cat << 'EOF' >> arch/arm64/configs/vendor/sweet_defconfig
           CONFIG_KSU=y
           CONFIG_KPROBES=y
@@ -77,7 +89,6 @@ jobs:
 
           make O=out ARCH=arm64 vendor/sweet_defconfig
 
-          # Ensure KernelSU and kprobes hook are locked
           scripts/config --file out/.config \
             -e CONFIG_KSU \
             -e CONFIG_KPROBES \
@@ -85,8 +96,6 @@ jobs:
             -e CONFIG_KSU_KPROBES_HOOK
 
           make O=out ARCH=arm64 olddefconfig
-
-          # Verify hook config is present
           grep -q "CONFIG_KSU_KPROBES_HOOK=y" out/.config || echo "CONFIG_KSU_KPROBES_HOOK=y" >> out/.config
 
           make -j$(nproc --all) O=out ARCH=arm64 \
@@ -99,10 +108,9 @@ jobs:
             Image.gz dtbs
 
       - name: Package with AnyKernel3
+        id: package
         run: |
-          BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y%m%d_%H%M')
-          ZIP_NAME="PixelOS-sweet-KernelSU-Next-${BUILD_DATE}.zip"
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          ZIP_NAME="PixelOS-sweet-KernelSU-Next-${{ needs.check.outputs.build_time }}.zip"
 
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
           sed -i 's/device.name1=.*/device.name1=sweet/g' anykernel/anykernel.sh
@@ -115,12 +123,49 @@ jobs:
           zip -r "../$ZIP_NAME" * -x .git README.md *placeholder
           cd ..
 
-          sha256sum "$ZIP_NAME" > "${ZIP_NAME}.sha256"
+          SHA_VAL=$(sha256sum "$ZIP_NAME" | awk '{print $1}')
+          echo "$SHA_VAL  $ZIP_NAME" > "${ZIP_NAME}.sha256"
+
+          echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          echo "sha256=${SHA_VAL}" >> $GITHUB_OUTPUT
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
+          name: ${{ steps.package.outputs.zip_name }}
           path: |
-            ${{ env.ZIP_NAME }}
-            ${{ env.ZIP_NAME }}.sha256
+            ${{ steps.package.outputs.zip_name }}
+            ${{ steps.package.outputs.zip_name }}.sha256
+
+  notify:
+    name: 3. Telegram Push Notification
+    needs: [check, build]
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Send Notification to Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BUILD_STATUS: ${{ needs.build.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          KERNEL_HEAD: ${{ needs.check.outputs.kernel_head }}
+          ZIP_NAME: ${{ needs.build.outputs.zip_name }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "Telegram credentials not configured. Skipping."
+            exit 0
+          fi
+
+          if [ "$BUILD_STATUS" = "success" ]; then
+            MSG="<b>Kernel Build Succeeded</b>%0A<b>Device:</b> Redmi Note 10 Pro (sweet)%0A<b>Base:</b> PixelOS seventeen (Android 17)%0A<b>Commit:</b> <code>${KERNEL_HEAD}</code>%0A<b>Root:</b> KernelSU-Next (legacy)%0A<b>Package:</b> <code>${ZIP_NAME}</code>%0A<b>SHA-256:</b> <code>${SHA256}</code>%0A<a href=\"${RUN_URL}\">View GitHub Run</a>"
+          else
+            MSG="<b>Kernel Build Failed</b>%0A<b>Device:</b> Redmi Note 10 Pro (sweet)%0A<b>Base:</b> PixelOS seventeen%0A<b>Status:</b> ${BUILD_STATUS}%0A<a href=\"${RUN_URL}\">View Error Log</a>"
+          fi
+
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT_ID}" \
+            -d "parse_mode=HTML" \
+            -d "disable_web_page_preview=true" \
+            -d "text=${MSG}"
