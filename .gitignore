@@ -1,0 +1,9 @@
+*.tar.gz
+*.zip
+*.sha256
+clang/
+gcc64/
+gcc32/
+kernel/
+anykernel/
+out/

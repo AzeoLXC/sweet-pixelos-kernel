@@ -1,0 +1,109 @@
+name: Build KernelSU Next PixelOS sweet
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_branch:
+        description: "KernelSU-Next branch to checkout"
+        required: false
+        default: "legacy"
+        type: string
+
+jobs:
+  build:
+    name: Compile & Package Kernel
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bc bison build-essential ca-certificates cpio curl flex git \
+            libc6-dev libelf-dev libssl-dev make openssl python3 \
+            python-is-python3 zlib1g-dev ccache zip jq
+
+      - name: Setup ZyCromerZ Clang & GCC Toolchains
+        run: |
+          mkdir -p clang
+          curl -LSs "https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230725-release/Clang-17.0.0-20230725.tar.gz" | tar -xz -C clang/
+
+          git clone --depth=1 https://github.com/greenforce-project/gcc-arm64 -b main gcc64
+          git clone --depth=1 https://github.com/greenforce-project/gcc-arm -b main gcc32
+
+          echo "CLANG_PATH=$GITHUB_WORKSPACE/clang" >> $GITHUB_ENV
+          echo "GCC64_PATH=$GITHUB_WORKSPACE/gcc64" >> $GITHUB_ENV
+          echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 -b 17 https://github.com/SoloSaravanan/kernel_xiaomi_sm6150.git kernel
+          cd kernel
+          KERNEL_HEAD=$(git rev-parse --short HEAD)
+          echo "KERNEL_HEAD=$KERNEL_HEAD" >> $GITHUB_ENV
+
+      - name: Setup KernelSU-Next
+        run: |
+          cd kernel
+          KSU_TARGET="${{ github.event.inputs.ksu_branch || 'legacy' }}"
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s "$KSU_TARGET"
+
+      - name: Compile Kernel
+        run: |
+          cd kernel
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PATH="$CLANG_PATH/bin:$GCC64_PATH/bin:$GCC32_PATH/bin:$PATH"
+          export KBUILD_BUILD_USER="azeolxc"
+          export KBUILD_BUILD_HOST="PixelOS-sweet"
+
+          make O=out ARCH=arm64 vendor/sweet_defconfig
+
+          # Enable KernelSU and required probing hooks
+          scripts/config --file out/.config \
+            -e CONFIG_KSU \
+            -e CONFIG_KPROBES \
+            -e CONFIG_HAVE_KPROBES \
+            -e CONFIG_KRETPROBES \
+            -e CONFIG_HAVE_KRETPROBES
+
+          make O=out ARCH=arm64 olddefconfig
+
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=$GCC64_PATH/bin/aarch64-elf- \
+            CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi- \
+            Image.gz dtbs
+
+      - name: Package with AnyKernel3
+        run: |
+          BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y%m%d_%H%M')
+          ZIP_NAME="PixelOS-sweet-KernelSU-Next-${BUILD_DATE}.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          sed -i 's/device.name1=.*/device.name1=sweet/g' anykernel/anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=sweetin/g' anykernel/anykernel.sh
+
+          cp kernel/out/arch/arm64/boot/Image.gz anykernel/Image.gz
+          find kernel/out/arch/arm64/boot/dts -name "*.dtb" -exec cat {} + > anykernel/dtb
+
+          cd anykernel
+          zip -r "../$ZIP_NAME" * -x .git README.md *placeholder
+          cd ..
+
+          sha256sum "$ZIP_NAME" > "${ZIP_NAME}.sha256"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: |
+            ${{ env.ZIP_NAME }}
+            ${{ env.ZIP_NAME }}.sha256
