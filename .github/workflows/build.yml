@@ -22,14 +22,16 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            bc bison build-essential ca-certificates cpio curl flex git \
+            aria2 bc bison build-essential ca-certificates cpio curl flex git \
             libc6-dev libelf-dev libssl-dev make openssl python3 \
             python-is-python3 zlib1g-dev ccache zip jq
 
       - name: Setup ZyCromerZ Clang & GCC Toolchains
         run: |
           mkdir -p clang
-          curl -LSs "https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230725-release/Clang-17.0.0-20230725.tar.gz" | tar -xz -C clang/
+          aria2c -q -s 16 -x 16 "https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230725-release/Clang-17.0.0-20230725.tar.gz" -o clang.tar.gz
+          tar -xzf clang.tar.gz -C clang/
+          rm -f clang.tar.gz
 
           git clone --depth=1 https://github.com/greenforce-project/gcc-arm64 -b main gcc64
           git clone --depth=1 https://github.com/greenforce-project/gcc-arm -b main gcc32
