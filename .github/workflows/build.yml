@@ -60,17 +60,29 @@ jobs:
           export KBUILD_BUILD_USER="azeolxc"
           export KBUILD_BUILD_HOST="PixelOS-sweet"
 
+          # Inject KSU and Kprobe configs into defconfig
+          cat << 'EOF' >> arch/arm64/configs/vendor/sweet_defconfig
+          CONFIG_KSU=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KRETPROBES=y
+          CONFIG_HAVE_KRETPROBES=y
+          CONFIG_KSU_KPROBES_HOOK=y
+          EOF
+
           make O=out ARCH=arm64 vendor/sweet_defconfig
 
-          # Enable KernelSU and required probing hooks
+          # Ensure KernelSU and kprobes hook are locked
           scripts/config --file out/.config \
             -e CONFIG_KSU \
             -e CONFIG_KPROBES \
-            -e CONFIG_HAVE_KPROBES \
             -e CONFIG_KRETPROBES \
-            -e CONFIG_HAVE_KRETPROBES
+            -e CONFIG_KSU_KPROBES_HOOK
 
           make O=out ARCH=arm64 olddefconfig
+
+          # Verify hook config is present
+          grep -q "CONFIG_KSU_KPROBES_HOOK=y" out/.config || echo "CONFIG_KSU_KPROBES_HOOK=y" >> out/.config
 
           make -j$(nproc --all) O=out ARCH=arm64 \
             LLVM=1 \
