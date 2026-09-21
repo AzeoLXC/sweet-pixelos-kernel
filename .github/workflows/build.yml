@@ -24,7 +24,7 @@ jobs:
       - name: Fetch Upstream Metadata
         id: get_meta
         run: |
-          SHA=$(curl -s "https://api.github.com/repos/SoloSaravanan/kernel_xiaomi_sm6150/commits/17" | jq -r '.sha[0:7]')
+          SHA=$(curl -s "https://api.github.com/repos/PixelOS-Devices/android_kernel_xiaomi_sm6150/commits/seventeen" | jq -r '.sha[0:7]')
           DATE=$(TZ=Asia/Jakarta date '+%Y%m%d_%H%M')
           TAG=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
           echo "kernel_head=${SHA}" >> $GITHUB_OUTPUT
@@ -66,7 +66,7 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          git clone --depth=1 -b 17 https://github.com/SoloSaravanan/kernel_xiaomi_sm6150.git kernel
+          git clone --depth=1 -b seventeen https://github.com/PixelOS-Devices/android_kernel_xiaomi_sm6150.git kernel
 
       - name: Setup KernelSU-Next
         run: |
@@ -84,7 +84,7 @@ jobs:
           export KBUILD_BUILD_USER="azeolxc"
           export KBUILD_BUILD_HOST="PixelOS-sweet"
 
-          cat << 'EOF' >> arch/arm64/configs/vendor/sweet_defconfig
+          cat << 'EOF' >> arch/arm64/configs/sweet_defconfig
           CONFIG_KSU=y
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
@@ -93,7 +93,7 @@ jobs:
           CONFIG_KSU_KPROBES_HOOK=y
           EOF
 
-          make O=out ARCH=arm64 vendor/sweet_defconfig
+          make O=out ARCH=arm64 sweet_defconfig
 
           scripts/config --file out/.config \
             -e CONFIG_KSU \
@@ -119,14 +119,8 @@ jobs:
           ZIP_NAME="PixelOS-sweet-KernelSU-Next-${{ needs.check.outputs.build_time }}.zip"
 
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
-          sed -i 's/kernel.string=.*/kernel.string=PixelOS sweet Kernel with KernelSU-Next/g' anykernel/anykernel.sh
-          sed -i 's/device.name1=.*/device.name1=sweet/g' anykernel/anykernel.sh
-          sed -i 's/device.name2=.*/device.name2=sweetin/g' anykernel/anykernel.sh
-          sed -i 's|BLOCK=.*|BLOCK=/dev/block/bootdevice/by-name/boot;|g' anykernel/anykernel.sh
-          sed -i 's/IS_SLOT_DEVICE=.*/IS_SLOT_DEVICE=0;/g' anykernel/anykernel.sh
-
+          cp anykernel_template/anykernel.sh anykernel/anykernel.sh
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/Image.gz
-          # Do not provide external dtb so AnyKernel3 preserves the device's stock OEM dtb in boot.img
 
           cd anykernel
           zip -r "../$ZIP_NAME" * -x .git README.md *placeholder
@@ -153,7 +147,7 @@ jobs:
           ZIP_NAME: ${{ steps.package.outputs.zip_name }}
           KERNEL_HEAD: ${{ needs.check.outputs.kernel_head }}
         run: |
-          NOTES=$(printf "KernelSU-Next automated build for Redmi Note 10 Pro (sweet)\n- Base: PixelOS seventeen (Android 17)\n- Upstream Commit: SoloSaravanan/kernel_xiaomi_sm6150@%s\n- Root: KernelSU-Next (legacy)\n- Compiler: ZyCromerZ Clang 17.0.0" "$KERNEL_HEAD")
+          NOTES=$(printf "KernelSU-Next automated build for Redmi Note 10 Pro (sweet)\n- Base: PixelOS seventeen (Android 17)\n- Upstream: PixelOS-Devices/android_kernel_xiaomi_sm6150@%s\n- Kernel Version: 4.14.357-openela-VantomKernel\n- Root: KernelSU-Next (legacy)\n- Compiler: ZyCromerZ Clang 17.0.0" "$KERNEL_HEAD")
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ZIP_NAME" "${ZIP_NAME}.sha256" --clobber

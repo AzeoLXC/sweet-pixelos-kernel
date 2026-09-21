@@ -10,12 +10,12 @@ Automated CI/CD builder for Xiaomi Redmi Note 10 Pro / Pro Max (`sweet` / `sweet
 |---|---|
 | Target Devices | Xiaomi Redmi Note 10 Pro (`sweet`), Redmi Note 10 Pro Max (`sweetin`) |
 | SoC / Platform | Qualcomm Snapdragon 732G / SM6150 (`sdmsteppe`) |
-| Linux Baseline | 4.14.357 LTS (`openela-Alita`) |
-| Upstream Baseline | [`SoloSaravanan/kernel_xiaomi_sm6150:17`](https://github.com/SoloSaravanan/kernel_xiaomi_sm6150/tree/17) (PixelOS 17 / Android 17) |
+| Linux Baseline | 4.14.357 LTS (`openela-VantomKernel`) |
+| Upstream Baseline | [`PixelOS-Devices/android_kernel_xiaomi_sm6150:seventeen`](https://github.com/PixelOS-Devices/android_kernel_xiaomi_sm6150/tree/seventeen) |
 | C/C++ Compiler | ZyCromerZ Clang 17.0.0 (`clang-17.0.0-20230725`) |
 | Assembler / Linker | LLVM Integrated Assembler (`LLVM=1 LLVM_IAS=1`, `ld.lld`) |
 | Cross Compilers | Greenforce Bare-Metal GCC (`aarch64-elf-` & `arm-eabi-`) |
-| Defconfig | `arch/arm64/configs/vendor/sweet_defconfig` |
+| Defconfig | `arch/arm64/configs/sweet_defconfig` |
 | Root Solution | KernelSU-Next (branch `legacy`, tag `v3.2.0-legacy`) |
 | Hook Implementation | Dynamic Kprobes (`CONFIG_KSU_KPROBES_HOOK=y`) |
 | Output Artifact | AnyKernel3 flashable zip archive (`PixelOS-sweet-KernelSU-Next-*.zip`) |
@@ -29,13 +29,13 @@ Automated CI/CD builder for Xiaomi Redmi Note 10 Pro / Pro Max (`sweet` / `sweet
 * **4.14 Timespec Alignment**: Injected patch into `KernelSU-Next/kernel/sulog/event.c` substituting legacy `get_monotonic_boottime` with `ktime_get_boottime_ts64(&ts)` to prevent `struct timespec64 *` pointer mismatch under Clang `-Werror`.
 * **Signature Bypass & Manager Binding**: Native manager APK signature verification enabled for official KernelSU and KernelSU-Next manager applications.
 
-### 2. Toolchain & Build Optimizations
-* **Clang 17 + LLD**: Compiled with full LLVM toolchain, ThinLTO link-time optimization, and openela patches.
-* **Network Fault Tolerance**: Toolchains fetched via multi-threaded segmented chunking (`aria2c -s 16 -x 16`) inside ephemeral GitHub runners.
+### 2. AnyKernel3 Boot Integrity
+* **Non-Destructive Flashing**: Employs `split_boot` and `flash_boot` to unpack/repack only the kernel image (`Image.gz`) while preserving the stock OEM first-stage init ramdisk and device tree blob (`dtb`) exactly as shipped by the ROM.
+* **SELinux & Partition Safety**: Eliminates ramdisk modification and cpio unpacking in recovery, preventing file context corruptions and splash-screen panics.
 
 ### 3. Pipeline Design
-* **Job 1 (`check`)**: Queries upstream commit SHA from `SoloSaravanan` and generates ISO build timestamps.
-* **Job 2 (`build`)**: Compiles `Image.gz` and device tree blobs (`dtb`), packages via AnyKernel3, generates SHA-256 checksums, and publishes a GitHub Release tagged with the build date (`YYYY.MM.DD`).
+* **Job 1 (`check`)**: Queries upstream commit SHA from `PixelOS-Devices` and generates ISO build timestamps.
+* **Job 2 (`build`)**: Compiles `Image.gz`, packages via AnyKernel3, generates SHA-256 checksums, and publishes a GitHub Release tagged with the build date (`YYYY.MM.DD`).
 * **Job 3 (`notify`)**: Dispatches an HTML payload directly to Telegram group via Bot API with build metadata, SHA-256, and release download links.
 
 ---
