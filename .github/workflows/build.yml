@@ -9,6 +9,9 @@ on:
         default: "legacy"
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   check:
     name: 1. Upstream & Metadata Check
@@ -16,14 +19,17 @@ jobs:
     outputs:
       kernel_head: ${{ steps.get_meta.outputs.kernel_head }}
       build_time: ${{ steps.get_meta.outputs.build_time }}
+      release_tag: ${{ steps.get_meta.outputs.release_tag }}
     steps:
       - name: Fetch Upstream Metadata
         id: get_meta
         run: |
           SHA=$(curl -s "https://api.github.com/repos/SoloSaravanan/kernel_xiaomi_sm6150/commits/17" | jq -r '.sha[0:7]')
           DATE=$(TZ=Asia/Jakarta date '+%Y%m%d_%H%M')
+          TAG=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
           echo "kernel_head=${SHA}" >> $GITHUB_OUTPUT
           echo "build_time=${DATE}" >> $GITHUB_OUTPUT
+          echo "release_tag=${TAG}" >> $GITHUB_OUTPUT
 
   build:
     name: 2. Compile & Package Kernel
@@ -137,6 +143,23 @@ jobs:
             ${{ steps.package.outputs.zip_name }}
             ${{ steps.package.outputs.zip_name }}.sha256
 
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check.outputs.release_tag }}
+          ZIP_NAME: ${{ steps.package.outputs.zip_name }}
+          KERNEL_HEAD: ${{ needs.check.outputs.kernel_head }}
+        run: |
+          NOTES=$(printf "KernelSU-Next automated build for Redmi Note 10 Pro (sweet)\n- Base: PixelOS seventeen (Android 17)\n- Upstream Commit: SoloSaravanan/kernel_xiaomi_sm6150@%s\n- Root: KernelSU-Next (legacy)\n- Compiler: ZyCromerZ Clang 17.0.0" "$KERNEL_HEAD")
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP_NAME" "${ZIP_NAME}.sha256" --clobber
+          else
+            gh release create "$TAG" "$ZIP_NAME" "${ZIP_NAME}.sha256" \
+              --title "$TAG" \
+              --notes "$NOTES"
+          fi
+
   notify:
     name: 3. Telegram Push Notification
     needs: [check, build]
@@ -149,6 +172,8 @@ jobs:
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BUILD_STATUS: ${{ needs.build.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.check.outputs.release_tag }}
+          RELEASE_TAG: ${{ needs.check.outputs.release_tag }}
           KERNEL_HEAD: ${{ needs.check.outputs.kernel_head }}
           ZIP_NAME: ${{ needs.build.outputs.zip_name }}
           SHA256: ${{ needs.build.outputs.sha256 }}
@@ -159,7 +184,7 @@ jobs:
           fi
 
           if [ "$BUILD_STATUS" = "success" ]; then
-            MSG="<b>Kernel Build Succeeded</b>%0A<b>Device:</b> Redmi Note 10 Pro (sweet)%0A<b>Base:</b> PixelOS seventeen (Android 17)%0A<b>Commit:</b> <code>${KERNEL_HEAD}</code>%0A<b>Root:</b> KernelSU-Next (legacy)%0A<b>Package:</b> <code>${ZIP_NAME}</code>%0A<b>SHA-256:</b> <code>${SHA256}</code>%0A<a href=\"${RUN_URL}\">View GitHub Run</a>"
+            MSG="<b>Kernel Build Succeeded</b>%0A<b>Device:</b> Redmi Note 10 Pro (sweet)%0A<b>Base:</b> PixelOS seventeen (Android 17)%0A<b>Commit:</b> <code>${KERNEL_HEAD}</code>%0A<b>Root:</b> KernelSU-Next (legacy)%0A<b>Package:</b> <code>${ZIP_NAME}</code>%0A<b>SHA-256:</b> <code>${SHA256}</code>%0A<b>Release:</b> <a href=\"${RELEASE_URL}\">${RELEASE_TAG}</a>%0A<a href=\"${RUN_URL}\">View GitHub Run</a>"
           else
             MSG="<b>Kernel Build Failed</b>%0A<b>Device:</b> Redmi Note 10 Pro (sweet)%0A<b>Base:</b> PixelOS seventeen%0A<b>Status:</b> ${BUILD_STATUS}%0A<a href=\"${RUN_URL}\">View Error Log</a>"
           fi
