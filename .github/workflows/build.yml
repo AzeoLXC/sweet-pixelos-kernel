@@ -119,8 +119,11 @@ jobs:
           ZIP_NAME="PixelOS-sweet-KernelSU-Next-${{ needs.check.outputs.build_time }}.zip"
 
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          sed -i 's/kernel.string=.*/kernel.string=PixelOS sweet Kernel with KernelSU-Next/g' anykernel/anykernel.sh
           sed -i 's/device.name1=.*/device.name1=sweet/g' anykernel/anykernel.sh
           sed -i 's/device.name2=.*/device.name2=sweetin/g' anykernel/anykernel.sh
+          sed -i 's|BLOCK=.*|BLOCK=/dev/block/bootdevice/by-name/boot;|g' anykernel/anykernel.sh
+          sed -i 's/IS_SLOT_DEVICE=.*/IS_SLOT_DEVICE=0;/g' anykernel/anykernel.sh
 
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/Image.gz
           find kernel/out/arch/arm64/boot/dts -name "*.dtb" -exec cat {} + > anykernel/dtb
