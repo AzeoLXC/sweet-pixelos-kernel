@@ -6,7 +6,12 @@ on:
       ksu_branch:
         description: "KernelSU-Next branch to checkout"
         required: false
-        default: "legacy"
+        default: "legacy-susfs"
+        type: string
+      ksu_repo:
+        description: "KernelSU-Next repository"
+        required: false
+        default: "https://github.com/xtrance-eng/KernelSU-Next.git"
         type: string
 
 permissions:
@@ -68,12 +73,14 @@ jobs:
         run: |
           git clone --depth=1 -b seventeen https://github.com/PixelOS-Devices/android_kernel_xiaomi_sm6150.git kernel
 
-      - name: Setup KernelSU-Next
+      - name: Setup KernelSU-Next, SuSFS & NoMount
         run: |
           cd kernel
-          KSU_TARGET="${{ github.event.inputs.ksu_branch || 'legacy' }}"
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s "$KSU_TARGET"
-          python3 ../scripts/patch_ksu.py
+          KSU_TARGET="${{ github.event.inputs.ksu_branch || 'legacy-susfs' }}"
+          KSU_REPO="${{ github.event.inputs.ksu_repo || 'https://github.com/xtrance-eng/KernelSU-Next.git' }}"
+          python3 ../scripts/patch_susfs_nomount.py \
+            --ksu-repo "$KSU_REPO" \
+            --ksu-branch "$KSU_TARGET"
 
       - name: Compile Kernel Image
         run: |
@@ -84,25 +91,29 @@ jobs:
           export KBUILD_BUILD_USER="azeolxc"
           export KBUILD_BUILD_HOST="PixelOS-sweet"
 
-          cat << 'EOF' >> arch/arm64/configs/sweet_defconfig
-          CONFIG_KSU=y
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KRETPROBES=y
-          CONFIG_HAVE_KRETPROBES=y
-          CONFIG_KSU_KPROBES_HOOK=y
-          EOF
-
           make O=out ARCH=arm64 sweet_defconfig
 
           scripts/config --file out/.config \
             -e CONFIG_KSU \
             -e CONFIG_KPROBES \
             -e CONFIG_KRETPROBES \
-            -e CONFIG_KSU_KPROBES_HOOK
+            -e CONFIG_KSU_KPROBES_HOOK \
+            -e CONFIG_KSU_SUSFS \
+            -e CONFIG_KSU_SUSFS_SUS_PATH \
+            -e CONFIG_KSU_SUSFS_SUS_MOUNT \
+            -e CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT \
+            -e CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT \
+            -e CONFIG_KSU_SUSFS_SUS_KSTAT \
+            -e CONFIG_KSU_SUSFS_TRY_UMOUNT \
+            -e CONFIG_KSU_SUSFS_SPOOF_UNAME \
+            -e CONFIG_KSU_SUSFS_ENABLE_LOG \
+            -e CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+            -e CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+            -e CONFIG_KSU_SUSFS_OPEN_REDIRECT \
+            -e CONFIG_KSU_SUSFS_SUS_MAP \
+            -e CONFIG_NOMOUNT
 
           make O=out ARCH=arm64 olddefconfig
-          grep -q "CONFIG_KSU_KPROBES_HOOK=y" out/.config || echo "CONFIG_KSU_KPROBES_HOOK=y" >> out/.config
 
           make -j$(nproc --all) O=out ARCH=arm64 \
             LLVM=1 \
@@ -116,7 +127,7 @@ jobs:
       - name: Package with AnyKernel3
         id: package
         run: |
-          ZIP_NAME="PixelOS-sweet-KernelSU-Next-${{ needs.check.outputs.build_time }}.zip"
+          ZIP_NAME="PixelOS-sweet-KernelSU-Next-SuSFS-NoMount-${{ needs.check.outputs.build_time }}.zip"
 
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
           cp anykernel_template/anykernel.sh anykernel/anykernel.sh
@@ -147,7 +158,7 @@ jobs:
           ZIP_NAME: ${{ steps.package.outputs.zip_name }}
           KERNEL_HEAD: ${{ needs.check.outputs.kernel_head }}
         run: |
-          NOTES=$(printf "KernelSU-Next automated build for Redmi Note 10 Pro (sweet)\n- Base: PixelOS seventeen (Android 17)\n- Upstream: PixelOS-Devices/android_kernel_xiaomi_sm6150@%s\n- Kernel Version: 4.14.357-openela-VantomKernel\n- Root: KernelSU-Next (legacy)\n- Compiler: ZyCromerZ Clang 17.0.0" "$KERNEL_HEAD")
+          NOTES=$(printf "KernelSU-Next + SuSFS + NoMount automated build for Redmi Note 10 Pro (sweet)\n- Base: PixelOS seventeen (Android 17)\n- Upstream: PixelOS-Devices/android_kernel_xiaomi_sm6150@%s\n- Kernel Version: 4.14.357-openela-VantomKernel\n- Root: KernelSU-Next (legacy-susfs)\n- Root Hiding: SuSFS v1.5.5 (kernel-4.14)\n- VFS Injection: NoMount (CONFIG_NOMOUNT=y)\n- Compiler: ZyCromerZ Clang 17.0.0" "$KERNEL_HEAD")
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ZIP_NAME" "${ZIP_NAME}.sha256" --clobber
@@ -181,7 +192,7 @@ jobs:
           fi
 
           if [ "$BUILD_STATUS" = "success" ]; then
-            MSG="<b>Kernel Build Succeeded</b>%0A<b>Device:</b> Redmi Note 10 Pro (sweet)%0A<b>Base:</b> PixelOS seventeen (Android 17)%0A<b>Commit:</b> <code>${KERNEL_HEAD}</code>%0A<b>Root:</b> KernelSU-Next (legacy)%0A<b>Package:</b> <code>${ZIP_NAME}</code>%0A<b>SHA-256:</b> <code>${SHA256}</code>%0A<b>Release:</b> <a href=\"${RELEASE_URL}\">${RELEASE_TAG}</a>%0A<a href=\"${RUN_URL}\">View GitHub Run</a>"
+            MSG="<b>Kernel Build Succeeded</b>%0A<b>Device:</b> Redmi Note 10 Pro (sweet)%0A<b>Base:</b> PixelOS seventeen (Android 17)%0A<b>Commit:</b> <code>${KERNEL_HEAD}</code>%0A<b>Features:</b> KernelSU-Next + SuSFS + NoMount%0A<b>Package:</b> <code>${ZIP_NAME}</code>%0A<b>SHA-256:</b> <code>${SHA256}</code>%0A<b>Release:</b> <a href=\"${RELEASE_URL}\">${RELEASE_TAG}</a>%0A<a href=\"${RUN_URL}\">View GitHub Run</a>"
           else
             MSG="<b>Kernel Build Failed</b>%0A<b>Device:</b> Redmi Note 10 Pro (sweet)%0A<b>Base:</b> PixelOS seventeen%0A<b>Status:</b> ${BUILD_STATUS}%0A<a href=\"${RUN_URL}\">View Error Log</a>"
           fi
