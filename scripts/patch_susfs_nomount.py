@@ -222,7 +222,7 @@ static inline void susfs_enable_log(void *arg) {}
                 f.write(h_text)
             log("Appended SuSFS compatibility extensions to include/linux/susfs.h")
 
-    # 3. Patch supercall.c for weak susfs_try_umount
+    # 3. Patch supercall.c: remove conflicting dummy susfs_try_umount and dereference *arg
     for sc_candidate in [
         os.path.join(kernel_dir, "KernelSU-Next", "kernel", "supercall", "supercall.c"),
         os.path.join(kernel_dir, "drivers", "kernelsu", "supercall", "supercall.c")
@@ -230,11 +230,38 @@ static inline void susfs_enable_log(void *arg) {}
         if os.path.exists(sc_candidate):
             with open(sc_candidate, "r") as f:
                 sc_text = f.read()
-            sc_text = sc_text.replace("void susfs_try_umount(uid_t new_uid)", "__weak void susfs_try_umount(uid_t new_uid)")
-            sc_text = sc_text.replace("int susfs_add_try_umount(void __user *arg)", "__weak int susfs_add_try_umount(void __user *arg)")
+            # Remove conflicting dummy definitions (already provided natively by fs/susfs.c)
+            idx1 = sc_text.find("void susfs_try_umount")
+            if idx1 != -1:
+                start = sc_text.rfind("#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT", 0, idx1)
+                end = sc_text.find("#endif", idx1) + 6
+                sc_text = sc_text[:start] + "/* Handled natively by fs/susfs.c */\n" + sc_text[end:]
+            # Dereference arg to (void __user *)*arg because arg is void __user **arg
+            for fn in [
+                "susfs_add_sus_path", "susfs_add_sus_path_loop", "susfs_set_hide_sus_mnts_for_non_su_procs",
+                "susfs_add_sus_kstat", "susfs_update_sus_kstat", "susfs_add_try_umount",
+                "susfs_set_uname", "susfs_enable_log", "susfs_set_cmdline_or_bootconfig",
+                "susfs_add_open_redirect", "susfs_add_sus_map", "susfs_set_avc_log_spoofing",
+                "susfs_get_enabled_features", "susfs_show_variant", "susfs_show_version"
+            ]:
+                sc_text = sc_text.replace(f"{fn}(arg)", f"{fn}((void __user *)*arg)")
             with open(sc_candidate, "w") as f:
                 f.write(sc_text)
-            log(f"Patched {sc_candidate} with __weak susfs_try_umount")
+            log(f"Patched {sc_candidate} (removed dummy definitions and dereferenced *arg)")
+
+    # 4. Patch kernel_umount.c: bridge ksu_try_umount for fs/susfs.c
+    for um_candidate in [
+        os.path.join(kernel_dir, "KernelSU-Next", "kernel", "feature", "kernel_umount.c"),
+        os.path.join(kernel_dir, "drivers", "kernelsu", "feature", "kernel_umount.c")
+    ]:
+        if os.path.exists(um_candidate):
+            with open(um_candidate, "r") as f:
+                um_text = f.read()
+            if "ksu_try_umount" not in um_text:
+                um_text += "\n#ifdef CONFIG_KSU_SUSFS\nvoid ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid)\n{\n    try_umount(mnt, flags);\n}\n#endif\n"
+                with open(um_candidate, "w") as f:
+                    f.write(um_text)
+                log(f"Patched {um_candidate} with ksu_try_umount bridge")
 
     # Fix fs/proc/cmdline.c for sweet's ALTER_CMDLINE structure
     cmdline_path = os.path.join(kernel_dir, "fs", "proc", "cmdline.c")
