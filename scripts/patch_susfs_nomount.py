@@ -124,23 +124,66 @@ def main():
     log(f"Applying SuSFS patch: {patch_file}")
     run_cmd(f"patch -p1 -N -s < {patch_file}")
 
-    # Append compatibility extensions to include/linux/susfs.h for KernelSU-Next legacy
+    # 1. Compatibility extensions for include/linux/susfs_def.h
+    susfs_def_header = os.path.join(kernel_dir, "include", "linux", "susfs_def.h")
+    if os.path.exists(susfs_def_header):
+        with open(susfs_def_header, "r") as f:
+            def_text = f.read()
+        compat_def_ext = """
+/* Compatibility extensions for KernelSU-Next legacy */
+#ifndef SUSFS_MAGIC
+#define SUSFS_MAGIC 0xFAFAFAFA
+#endif
+#ifndef CMD_SUSFS_ADD_SUS_PATH_LOOP
+#define CMD_SUSFS_ADD_SUS_PATH_LOOP 0x55551
+#endif
+#ifndef CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS
+#define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
+#endif
+#ifndef CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING
+#define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING 0x555c1
+#endif
+#ifndef CMD_SUSFS_ADD_SUS_MAP
+#define CMD_SUSFS_ADD_SUS_MAP 0x555c2
+#endif
+
+#ifndef TASK_STRUCT_PROC_UMOUNTED
+#define TASK_STRUCT_PROC_UMOUNTED BIT(25)
+#endif
+
+#include <linux/sched.h>
+
+static inline void susfs_set_current_proc_umounted(void) {
+#if defined(CONFIG_KSU_SUSFS)
+	current->susfs_task_state |= TASK_STRUCT_PROC_UMOUNTED;
+#endif
+}
+
+static inline bool susfs_is_current_proc_umounted(void) {
+#if defined(CONFIG_KSU_SUSFS)
+	return !!(current->susfs_task_state & TASK_STRUCT_PROC_UMOUNTED);
+#else
+	return false;
+#endif
+}
+"""
+        if "susfs_set_current_proc_umounted" not in def_text:
+            idx = def_text.rfind("#endif")
+            if idx != -1:
+                def_text = def_text[:idx] + compat_def_ext + "\n#endif\n"
+            else:
+                def_text += compat_def_ext
+            with open(susfs_def_header, "w") as f:
+                f.write(def_text)
+            log("Appended SuSFS compatibility extensions to include/linux/susfs_def.h")
+
+    # 2. Compatibility extensions for include/linux/susfs.h
     susfs_header = os.path.join(kernel_dir, "include", "linux", "susfs.h")
     if os.path.exists(susfs_header):
         with open(susfs_header, "r") as f:
             h_text = f.read()
         compat_ext = """
 /* Compatibility extensions for KernelSU-Next legacy */
-#ifndef TASK_STRUCT_PROC_UMOUNTED
-#define TASK_STRUCT_PROC_UMOUNTED BIT(25)
-#endif
-
-static inline void susfs_set_current_proc_umounted(void) {
-	current->susfs_task_state |= TASK_STRUCT_PROC_UMOUNTED;
-}
-static inline bool susfs_is_current_proc_umounted(void) {
-	return !!(current->susfs_task_state & TASK_STRUCT_PROC_UMOUNTED);
-}
 static inline void susfs_show_version(void *arg) {
 	char *ver = SUSFS_VERSION;
 	void __user **uarg = (void __user **)arg;
@@ -167,8 +210,9 @@ static inline void susfs_set_avc_log_spoofing(void *arg) {}
 static inline void susfs_add_sus_path_loop(void *arg) {}
 static inline void susfs_set_hide_sus_mnts_for_non_su_procs(void *arg) {}
 static inline void susfs_add_sus_map(void *arg) {}
+static inline void susfs_enable_log(void *arg) {}
 """
-        if "susfs_set_current_proc_umounted" not in h_text:
+        if "susfs_show_version" not in h_text:
             idx = h_text.rfind("#endif")
             if idx != -1:
                 h_text = h_text[:idx] + compat_ext + "\n#endif\n"
@@ -177,6 +221,20 @@ static inline void susfs_add_sus_map(void *arg) {}
             with open(susfs_header, "w") as f:
                 f.write(h_text)
             log("Appended SuSFS compatibility extensions to include/linux/susfs.h")
+
+    # 3. Patch supercall.c for weak susfs_try_umount
+    for sc_candidate in [
+        os.path.join(kernel_dir, "KernelSU-Next", "kernel", "supercall", "supercall.c"),
+        os.path.join(kernel_dir, "drivers", "kernelsu", "supercall", "supercall.c")
+    ]:
+        if os.path.exists(sc_candidate):
+            with open(sc_candidate, "r") as f:
+                sc_text = f.read()
+            sc_text = sc_text.replace("void susfs_try_umount(uid_t new_uid)", "__weak void susfs_try_umount(uid_t new_uid)")
+            sc_text = sc_text.replace("int susfs_add_try_umount(void __user *arg)", "__weak int susfs_add_try_umount(void __user *arg)")
+            with open(sc_candidate, "w") as f:
+                f.write(sc_text)
+            log(f"Patched {sc_candidate} with __weak susfs_try_umount")
 
     # Fix fs/proc/cmdline.c for sweet's ALTER_CMDLINE structure
     cmdline_path = os.path.join(kernel_dir, "fs", "proc", "cmdline.c")
