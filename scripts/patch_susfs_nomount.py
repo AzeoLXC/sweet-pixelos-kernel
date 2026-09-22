@@ -124,19 +124,59 @@ def main():
     log(f"Applying SuSFS patch: {patch_file}")
     run_cmd(f"patch -p1 -N -s < {patch_file}")
 
-    # Overwrite with bundled updated SuSFS files from patches/susfs if present
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bundled_patches = os.path.join(repo_root, "patches", "susfs")
-    if os.path.exists(bundled_patches):
-        log(f"Applying bundled updated SuSFS files from {bundled_patches}...")
-        for root, dirs, files in os.walk(bundled_patches):
-            for f in files:
-                src = os.path.join(root, f)
-                rel = os.path.relpath(src, bundled_patches)
-                dst = os.path.join(kernel_dir, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
-                log(f"Overwrote {rel} with bundled version")
+    # Append compatibility extensions to include/linux/susfs.h for KernelSU-Next legacy
+    susfs_header = os.path.join(kernel_dir, "include", "linux", "susfs.h")
+    if os.path.exists(susfs_header):
+        with open(susfs_header, "r") as f:
+            h_text = f.read()
+        compat_ext = """
+/* Compatibility extensions for KernelSU-Next legacy */
+#ifndef TASK_STRUCT_PROC_UMOUNTED
+#define TASK_STRUCT_PROC_UMOUNTED BIT(25)
+#endif
+
+static inline void susfs_set_current_proc_umounted(void) {
+	current->susfs_task_state |= TASK_STRUCT_PROC_UMOUNTED;
+}
+static inline bool susfs_is_current_proc_umounted(void) {
+	return !!(current->susfs_task_state & TASK_STRUCT_PROC_UMOUNTED);
+}
+static inline void susfs_show_version(void *arg) {
+	char *ver = SUSFS_VERSION;
+	void __user **uarg = (void __user **)arg;
+	if (uarg && *uarg) {
+		copy_to_user(*uarg, ver, strlen(ver) + 1);
+	}
+}
+static inline void susfs_show_variant(void *arg) {
+	char *var = "SUSFS_4.14";
+	void __user **uarg = (void __user **)arg;
+	if (uarg && *uarg) {
+		copy_to_user(*uarg, var, strlen(var) + 1);
+	}
+}
+static inline void susfs_get_enabled_features(void *arg) {
+	u64 feat = 0xFF;
+	void __user **uarg = (void __user **)arg;
+	if (uarg && *uarg) {
+		copy_to_user(*uarg, &feat, sizeof(feat));
+	}
+}
+static inline void susfs_start_sdcard_monitor_fn(void) {}
+static inline void susfs_set_avc_log_spoofing(void *arg) {}
+static inline void susfs_add_sus_path_loop(void *arg) {}
+static inline void susfs_set_hide_sus_mnts_for_non_su_procs(void *arg) {}
+static inline void susfs_add_sus_map(void *arg) {}
+"""
+        if "susfs_set_current_proc_umounted" not in h_text:
+            idx = h_text.rfind("#endif")
+            if idx != -1:
+                h_text = h_text[:idx] + compat_ext + "\n#endif\n"
+            else:
+                h_text += compat_ext
+            with open(susfs_header, "w") as f:
+                f.write(h_text)
+            log("Appended SuSFS compatibility extensions to include/linux/susfs.h")
 
     # Fix fs/proc/cmdline.c for sweet's ALTER_CMDLINE structure
     cmdline_path = os.path.join(kernel_dir, "fs", "proc", "cmdline.c")
