@@ -249,7 +249,7 @@ static inline void susfs_enable_log(void *arg) {}
                 f.write(sc_text)
             log(f"Patched {sc_candidate} (removed dummy definitions and dereferenced *arg)")
 
-    # 4. Patch kernel_umount.c: bridge ksu_try_umount for fs/susfs.c
+    # 4. Patch kernel_umount.c: bridge ksu_try_umount, susfs_try_umount_all, susfs_run_sus_path_loop
     for um_candidate in [
         os.path.join(kernel_dir, "KernelSU-Next", "kernel", "feature", "kernel_umount.c"),
         os.path.join(kernel_dir, "drivers", "kernelsu", "feature", "kernel_umount.c")
@@ -258,10 +258,42 @@ static inline void susfs_enable_log(void *arg) {}
             with open(um_candidate, "r") as f:
                 um_text = f.read()
             if "ksu_try_umount" not in um_text:
-                um_text += "\n#ifdef CONFIG_KSU_SUSFS\nvoid ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid)\n{\n    try_umount(mnt, flags);\n}\n#endif\n"
+                um_bridge = """
+#ifdef CONFIG_KSU_SUSFS
+#ifndef MNT_DETACH
+#define MNT_DETACH 0x00000002
+#endif
+
+void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid)
+{
+    try_umount(mnt, flags);
+}
+
+extern void susfs_try_umount(uid_t target_uid);
+
+void susfs_try_umount_all(uid_t uid)
+{
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+    susfs_try_umount(uid);
+    ksu_try_umount("/system", true, 0, uid);
+    ksu_try_umount("/system_ext", true, 0, uid);
+    ksu_try_umount("/vendor", true, 0, uid);
+    ksu_try_umount("/product", true, 0, uid);
+    ksu_try_umount("/odm", true, 0, uid);
+    ksu_try_umount("/data/adb/modules", false, MNT_DETACH, uid);
+    ksu_try_umount("/debug_ramdisk", true, MNT_DETACH, uid);
+#endif
+}
+
+void susfs_run_sus_path_loop(void)
+{
+}
+#endif
+"""
+                um_text += um_bridge
                 with open(um_candidate, "w") as f:
                     f.write(um_text)
-                log(f"Patched {um_candidate} with ksu_try_umount bridge")
+                log(f"Patched {um_candidate} with ksu_try_umount, susfs_try_umount_all, and susfs_run_sus_path_loop")
 
     # Fix fs/proc/cmdline.c for sweet's ALTER_CMDLINE structure
     cmdline_path = os.path.join(kernel_dir, "fs", "proc", "cmdline.c")
