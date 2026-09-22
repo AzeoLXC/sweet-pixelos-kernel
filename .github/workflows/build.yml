@@ -31,7 +31,7 @@ jobs:
         run: |
           SHA=$(curl -s "https://api.github.com/repos/PixelOS-Devices/android_kernel_xiaomi_sm6150/commits/seventeen" | jq -r '.sha[0:7]')
           DATE=$(TZ=Asia/Jakarta date '+%Y%m%d_%H%M')
-          TAG=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
+          TAG=$(TZ=Asia/Jakarta date '+%y%m%d.%H%M')
           echo "kernel_head=${SHA}" >> $GITHUB_OUTPUT
           echo "build_time=${DATE}" >> $GITHUB_OUTPUT
           echo "release_tag=${TAG}" >> $GITHUB_OUTPUT
