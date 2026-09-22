@@ -184,33 +184,108 @@ static inline bool susfs_is_current_proc_umounted(void) {
             h_text = f.read()
         compat_ext = """
 /* Compatibility extensions for KernelSU-Next legacy */
-static inline void susfs_show_version(void *arg) {
-	char *ver = SUSFS_VERSION;
-	void __user **uarg = (void __user **)arg;
-	if (uarg && *uarg) {
-		copy_to_user(*uarg, ver, strlen(ver) + 1);
-	}
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+
+#ifndef SUSFS_MAX_VERSION_BUFSIZE
+#define SUSFS_MAX_VERSION_BUFSIZE 16
+#endif
+#ifndef SUSFS_MAX_VARIANT_BUFSIZE
+#define SUSFS_MAX_VARIANT_BUFSIZE 16
+#endif
+#ifndef SUSFS_ENABLED_FEATURES_SIZE
+#define SUSFS_ENABLED_FEATURES_SIZE 8192
+#endif
+
+struct st_susfs_version_compat {
+	char susfs_version[SUSFS_MAX_VERSION_BUFSIZE];
+	int err;
+};
+
+struct st_susfs_variant_compat {
+	char susfs_variant[SUSFS_MAX_VARIANT_BUFSIZE];
+	int err;
+};
+
+struct st_susfs_enabled_features_compat {
+	char enabled_features[SUSFS_ENABLED_FEATURES_SIZE];
+	int err;
+};
+
+static inline void susfs_show_version(void __user *arg) {
+	struct st_susfs_version_compat info;
+	if (!arg)
+		return;
+	memset(&info, 0, sizeof(info));
+	strncpy(info.susfs_version, SUSFS_VERSION, sizeof(info.susfs_version) - 1);
+	info.err = 0;
+	if (copy_to_user(arg, &info, sizeof(info)))
+		pr_err("susfs_show_version: copy_to_user failed\\n");
 }
-static inline void susfs_show_variant(void *arg) {
-	char *var = "SUSFS_4.14";
-	void __user **uarg = (void __user **)arg;
-	if (uarg && *uarg) {
-		copy_to_user(*uarg, var, strlen(var) + 1);
-	}
+
+static inline void susfs_show_variant(void __user *arg) {
+	struct st_susfs_variant_compat info;
+	if (!arg)
+		return;
+	memset(&info, 0, sizeof(info));
+	strncpy(info.susfs_variant, "SUSFS_4.14", sizeof(info.susfs_variant) - 1);
+	info.err = 0;
+	if (copy_to_user(arg, &info, sizeof(info)))
+		pr_err("susfs_show_variant: copy_to_user failed\\n");
 }
-static inline void susfs_get_enabled_features(void *arg) {
-	u64 feat = 0xFF;
-	void __user **uarg = (void __user **)arg;
-	if (uarg && *uarg) {
-		copy_to_user(*uarg, &feat, sizeof(feat));
-	}
+
+static inline void susfs_get_enabled_features(void __user *arg) {
+	struct st_susfs_enabled_features_compat *info;
+	if (!arg)
+		return;
+	info = kzalloc(sizeof(*info), GFP_ATOMIC);
+	if (!info)
+		return;
+	snprintf(info->enabled_features, sizeof(info->enabled_features),
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+		"CONFIG_KSU_SUSFS_SUS_PATH\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+		"CONFIG_KSU_SUSFS_SUS_MOUNT\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+		"CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+		"CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+		"CONFIG_KSU_SUSFS_SUS_KSTAT\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+		"CONFIG_KSU_SUSFS_TRY_UMOUNT\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+		"CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+		"CONFIG_KSU_SUSFS_SPOOF_UNAME\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+		"CONFIG_KSU_SUSFS_ENABLE_LOG\\n"
+#endif
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+		"CONFIG_KSU_SUSFS_OPEN_REDIRECT\\n"
+#endif
+		"CONFIG_KSU_SUSFS\\n"
+	);
+	info->err = 0;
+	if (copy_to_user(arg, info, sizeof(*info)))
+		pr_err("susfs_get_enabled_features: copy_to_user failed\\n");
+	kfree(info);
 }
+
 static inline void susfs_start_sdcard_monitor_fn(void) {}
-static inline void susfs_set_avc_log_spoofing(void *arg) {}
-static inline void susfs_add_sus_path_loop(void *arg) {}
-static inline void susfs_set_hide_sus_mnts_for_non_su_procs(void *arg) {}
-static inline void susfs_add_sus_map(void *arg) {}
-static inline void susfs_enable_log(void *arg) {}
+static inline void susfs_set_avc_log_spoofing(void __user *arg) {}
+static inline void susfs_add_sus_path_loop(void __user *arg) {}
+static inline void susfs_set_hide_sus_mnts_for_non_su_procs(void __user *arg) {}
+static inline void susfs_add_sus_map(void __user *arg) {}
+static inline void susfs_enable_log(void __user *arg) {}
 """
         if "susfs_show_version" not in h_text:
             idx = h_text.rfind("#endif")
