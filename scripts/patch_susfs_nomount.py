@@ -124,6 +124,20 @@ def main():
     log(f"Applying SuSFS patch: {patch_file}")
     run_cmd(f"patch -p1 -N -s < {patch_file}")
 
+    # Overwrite with bundled updated SuSFS files from patches/susfs if present
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bundled_patches = os.path.join(repo_root, "patches", "susfs")
+    if os.path.exists(bundled_patches):
+        log(f"Applying bundled updated SuSFS files from {bundled_patches}...")
+        for root, dirs, files in os.walk(bundled_patches):
+            for f in files:
+                src = os.path.join(root, f)
+                rel = os.path.relpath(src, bundled_patches)
+                dst = os.path.join(kernel_dir, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
+                log(f"Overwrote {rel} with bundled version")
+
     # Fix fs/proc/cmdline.c for sweet's ALTER_CMDLINE structure
     cmdline_path = os.path.join(kernel_dir, "fs", "proc", "cmdline.c")
     if os.path.exists(cmdline_path):
