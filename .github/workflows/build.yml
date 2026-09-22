@@ -111,7 +111,17 @@ jobs:
             -e CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
             -e CONFIG_KSU_SUSFS_OPEN_REDIRECT \
             -e CONFIG_KSU_SUSFS_SUS_MAP \
-            -e CONFIG_NOMOUNT
+            -e CONFIG_NOMOUNT \
+            -d CONFIG_HZ_100 \
+            -e CONFIG_HZ_300 \
+            --set-val CONFIG_HZ 300 \
+            -e CONFIG_JUMP_LABEL \
+            -e CONFIG_WQ_POWER_EFFICIENT_DEFAULT \
+            -e CONFIG_TCP_CONG_ADVANCED \
+            -e CONFIG_TCP_CONG_BBR \
+            --set-str CONFIG_DEFAULT_TCP_CONG "bbr" \
+            -e CONFIG_NET_SCH_FQ \
+            -d CONFIG_PROFILING
 
           make O=out ARCH=arm64 olddefconfig
 
